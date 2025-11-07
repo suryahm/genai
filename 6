@@ -1,0 +1,69 @@
+# Install necessary libraries 
+!pip install tensorflow matplotlib numpy 
+ 
+import tensorflow as tf 
+from tensorflow.keras.layers import Input, Dense, Lambda, Flatten, Reshape, Layer 
+from tensorflow.keras.models import Model 
+from tensorflow.keras.losses import binary_crossentropy 
+from tensorflow.keras import backend as K 
+ 
+import numpy as np 
+import matplotlib.pyplot as plt 
+ 
+# Load and preprocess MNIST dataset 
+(x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data() 
+x_train, x_test = x_train.astype('float32') / 255., x_test.astype('float32') / 255. 
+x_train, x_test = np.reshape(x_train, (-1, 28, 28, 1)), np.reshape(x_test, (-1, 28, 28, 1)) 
+normal_data, anomaly_data = x_train[y_train == 1], x_test[y_test != 1] 
+ 
+# Encoder and Decoder models 
+inputs = Input(shape=(28, 28, 1)) 
+x = Dense(64, activation='relu')(Flatten()(inputs)) 
+z_mean, z_log_var = Dense(2)(x), Dense(2)(x) 
+z = Lambda(lambda a: a[0] + K.exp(0.5 * a[1]) * 
+K.random_normal(K.shape(a[0])))([z_mean, z_log_var]) 
+encoder = Model(inputs, [z_mean, z_log_var, z]) 
+ 
+latent_inputs = Input(shape=(2,)) 
+decoder = Model(latent_inputs, Reshape((28, 28, 1))(Dense(784, 
+activation='sigmoid')(Dense(128, activation='relu')(latent_inputs)))) 
+ 
+# Custom Loss Layer 
+class VAELossLayer(Layer): 
+    def call(self, inputs): 
+        x, y, z_mean, z_log_var = inputs 
+        recon_loss = binary_crossentropy(K.flatten(x), K.flatten(y)) * 784 
+        kl_loss = -0.5 * K.sum(1 + z_log_var - K.square(z_mean) - K.exp(z_log_var), axis=-1) 
+        self.add_loss(K.mean(recon_loss + kl_loss)) 
+        return y 
+ 
+# VAE model with custom loss 
+outputs = VAELossLayer()([inputs, decoder(encoder(inputs)[2]), z_mean, z_log_var]) 
+vae = Model(inputs, outputs) 
+vae.compile(optimizer='adam') 
+vae.fit(normal_data, normal_data, epochs=50, batch_size=128, validation_data=(x_test, 
+x_test)) 
+ 
+# Anomaly detection 
+def detect_anomalies(data, threshold=None): 
+    reconstructions = vae.predict(data) 
+    errors = np.mean(np.abs(reconstructions - data), axis=(1, 2, 3)) 
+    threshold = threshold or np.percentile(errors, 95) 
+    return errors > threshold, errors, threshold 
+ 
+# Visualize results 
+flags, errors, threshold = detect_anomalies(anomaly_data) 
+plt.hist(errors, bins=50, color='blue', alpha=0.7) 
+plt.axvline(threshold, color='red', linestyle='dashed', linewidth=2) 
+plt.title('Reconstruction Error Distribution') 
+plt.xlabel('Reconstruction Error'); plt.ylabel('Frequency'); plt.show() 
+ 
+plt.figure(figsize=(15, 6)) 
+for i in range(10): 
+    plt.subplot(2, 10, i + 1) 
+    plt.imshow(normal_data[i].reshape(28, 28), cmap='gray') 
+    plt.title('Normal'); plt.axis('off') 
+    plt.subplot(2, 10, i + 11) 
+    plt.imshow(anomaly_data[i].reshape(28, 28), cmap='gray') 
+    plt.title('Anomaly' if flags[i] else 'Normal'); plt.axis('off') 
+plt.tight_layout(); plt.show() 
