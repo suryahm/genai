@@ -1,0 +1,61 @@
+import tensorflow as tf 
+import matplotlib.pyplot as plt 
+ 
+BATCH_SIZE = 32 
+ 
+# Models 
+make_gen = lambda: tf.keras.Sequential([ 
+    tf.keras.layers.Dense(7*7*32, input_shape=(100,), use_bias=False), 
+    tf.keras.layers.BatchNormalization(), 
+    tf.keras.layers.LeakyReLU(), 
+    tf.keras.layers.Reshape((7, 7, 32)), 
+    tf.keras.layers.Conv2DTranspose(1, (5, 5), strides=(4, 4), padding='same', 
+activation='tanh') 
+]) 
+ 
+make_disc = lambda: tf.keras.Sequential([ 
+    tf.keras.layers.Conv2D(32, (5, 5), strides=(2, 2), padding='same', input_shape=[28, 28, 1]), 
+    tf.keras.layers.LeakyReLU(), 
+    tf.keras.layers.Flatten(), 
+    tf.keras.layers.Dense(1) 
+]) 
+ 
+loss = tf.keras.losses.BinaryCrossentropy(from_logits=True) 
+ 
+gen_loss = lambda fake: loss(tf.ones_like(fake), fake) 
+disc_loss = lambda real, fake: loss(tf.ones_like(real), real) + loss(tf.zeros_like(fake), fake) 
+ 
+@tf.function 
+def train_step(images, gen, disc, gen_opt, disc_opt): 
+    noise = tf.random.normal([BATCH_SIZE, 100]) 
+    with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
+  g_imgs = gen(noise, training=True) 
+        real_out, fake_out = disc(images, training=True), disc(g_imgs, training=True) 
+        g_loss, d_loss = gen_loss(fake_out), disc_loss(real_out, fake_out) 
+        gen_opt.apply_gradients(zip(gen_tape.gradient(g_loss, gen.trainable_variables), 
+gen.trainable_variables)) 
+        disc_opt.apply_gradients(zip(disc_tape.gradient(d_loss, disc.trainable_variables), 
+disc.trainable_variables)) 
+ 
+def train(dataset, epochs): 
+    gen, disc = make_gen(), make_disc() 
+    g_opt, d_opt = tf.keras.optimizers.Adam(1e-3), tf.keras.optimizers.Adam(1e-3) 
+    for _ in range(epochs): 
+        for img_batch in dataset: 
+            train_step(img_batch, gen, disc, g_opt, d_opt) 
+    return gen 
+ 
+# Data 
+(train_images, _), _ = tf.keras.datasets.mnist.load_data() 
+train_images = (train_images.reshape(-1, 28, 28, 1) - 127.5) / 127.5 
+train_dataset = 
+tf.data.Dataset.from_tensor_slices(train_images).shuffle(60000).batch(BATCH_SIZE) 
+ 
+# Train and visualize 
+gen = train(train_dataset, 10) 
+preds = gen(tf.random.normal([16, 100]), training=False) 
+plt.figure(figsize=(4, 4)) 
+for i in range(16): 
+    plt.subplot(4, 4, i+1), plt.imshow(preds[i, :, :, 0] * 0.5 + 0.5, cmap='gray'), 
+    plt.axis('off') 
+plt.show() 
