@@ -1,0 +1,111 @@
+import numpy as np 
+import tensorflow as tf 
+from tensorflow.keras.layers import Dense, Conv2D, Conv2DTranspose, LeakyReLU, 
+BatchNormalization, UpSampling2D, Flatten, Reshape 
+from tensorflow.keras.models import Sequential 
+from tensorflow.keras.optimizers import Adam 
+ 
+# Function to add a generator block 
+def add_generator_block(model): 
+    model.add(UpSampling2D())  # Double the resolution 
+    model.add(Conv2D(128, (3, 3), padding='same')) 
+    model.add(BatchNormalization(momentum=0.8)) 
+    model.add(LeakyReLU(alpha=0.2)) 
+    model.add(Conv2D(3, (3, 3), padding='same', activation='tanh'))  # Output with 3 channels 
+    return model 
+ 
+# Function to add a discriminator block 
+def add_discriminator_block(model, input_shape): 
+  model.add(Conv2D(128, (3, 3), padding='same', input_shape=input_shape)) 
+    model.add(BatchNormalization(momentum=0.8)) 
+    model.add(LeakyReLU(alpha=0.2)) 
+    model.add(Conv2D(128, (3, 3), padding='same')) 
+    model.add(BatchNormalization(momentum=0.8)) 
+    model.add(LeakyReLU(alpha=0.2)) 
+    return model 
+ 
+# Function to create the progressive GAN models 
+def create_progressive_gan(starting_resolution=(4, 4, 3)): 
+    input_shape = starting_resolution 
+ 
+    # Generator model 
+    generator = Sequential() 
+    generator.add(Dense(4 * 4 * 128, activation="relu", input_dim=100)) 
+    generator.add(Reshape((4, 4, 128))) 
+    generator = add_generator_block(generator) 
+ 
+    # Discriminator model 
+    discriminator = Sequential() 
+    discriminator = add_discriminator_block(discriminator, input_shape=(8, 8, 3)) 
+    discriminator.add(Flatten()) 
+    discriminator.add(Dense(1, activation='sigmoid')) 
+    discriminator.compile(loss='binary_crossentropy', optimizer=Adam(0.0002, 0.5), 
+metrics=['accuracy']) 
+ 
+    # Combined model (generator + discriminator) 
+    discriminator.trainable = False 
+    combined = Sequential([generator, discriminator]) 
+    combined.compile(loss='binary_crossentropy', optimizer=Adam(0.0002, 0.5)) 
+ 
+    return generator, discriminator, combined 
+ 
+# Create the models 
+generator, discriminator, combined = create_progressive_gan() 
+ 
+@tf.function(reduce_retracing=True) 
+def train_step(generator, discriminator, combined, batch_size): 
+    half_batch = batch_size // 2 
+ 
+    # Train Discriminator 
+    noise = tf.random.normal([half_batch, 100])  # Random noise 
+    generated_images = generator(noise, training=False)  # Generate fake images
+ # Dummy real images (e.g., random noise as real images) 
+    real_images = tf.random.uniform([half_batch, 8, 8, 3]) 
+ 
+    # Labels for real (1) and fake (0) 
+    real_labels = tf.ones((half_batch, 1)) 
+    fake_labels = tf.zeros((half_batch, 1)) 
+ 
+    # Train on real images 
+    d_loss_real = discriminator.train_on_batch(real_images, real_labels) 
+ 
+    # Train on fake images 
+    d_loss_fake = discriminator.train_on_batch(generated_images, fake_labels) 
+ 
+    # Calculate discriminator loss 
+    d_loss = 0.5 * (d_loss_real[0] + d_loss_fake[0]) 
+    d_acc = 0.5 * (d_loss_real[1] + d_loss_fake[1]) 
+ 
+    # Train Generator 
+    noise = tf.random.normal([batch_size, 100]) 
+    valid_labels = tf.ones((batch_size, 1))  # Generator wants discriminator to think these are 
+real 
+ 
+    # Train generator to trick discriminator 
+    g_loss = combined.train_on_batch(noise, valid_labels) 
+ 
+    return d_loss, d_acc, g_loss 
+ 
+def train_gan(generator, discriminator, combined, epochs, batch_size=32): 
+    for epoch in range(epochs): 
+        d_loss, d_acc, g_loss = train_step(generator, discriminator, combined, batch_size) 
+ 
+        # Print progress 
+        print(f"Epoch {epoch + 1}/{epochs} - D Loss: {d_loss:.4f}, D Acc: {d_acc * 
+100:.2f}%, G Loss: {g_loss:.4f}") 
+ 
+# Train the GAN with progressive growing 
+train_gan(generator, discriminator, combined, epochs=1000, batch_size=32) 
+Generate Images 
+# Generate noise 
+noise = np.random.normal(0, 1, (1, 100))  # Generating one sample 
+# Generate an image from the generator 
+generated_image = generator.predict(noise) 
+Display the Image Using Matplotlib 
+import matplotlib.pyplot as plt 
+# Rescale image from [-1, 1] to [0, 1] if using tanh activation 
+generated_image = (generated_image + 1) / 2.0 
+# Plot the image 
+plt.imshow(generated_image[0])  # Display the first image in the batch 
+plt.axis('off')  # Turn off axis 
+plt.show()  # Show the image 
