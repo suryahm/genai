@@ -1,0 +1,86 @@
+!pip install torch torchvision matplotlib tqdm 
+import torch 
+import torch.nn as nn 
+import torch.optim as optim 
+from torchvision import datasets, transforms 
+from torch.utils.data import DataLoader 
+import matplotlib.pyplot as plt 
+from tqdm import tqdm  # For progress bar 
+ 
+# Hyperparameters 
+BATCH_SIZE = 256 
+NOISE_DIM = 100 
+EPOCHS = 10  # Reduced for quicker runs 
+LEARNING_RATE = 0.0002 
+ 
+# Check if GPU is available and use it if possible 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu') 
+ 
+# Data preprocessing and loading 
+transform = transforms.Compose([ 
+    transforms.ToTensor(), 
+    transforms.Normalize((0.5,), (0.5,)) 
+]) 
+ 
+train_data = datasets.MNIST(root='mnist_data', train=True, transform=transform, 
+download=True) 
+train_loader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True) 
+ 
+# Generator model 
+class Generator(nn.Module): 
+    def __init__(self): 
+        super(Generator, self).__init__() 
+        self.model = nn.Sequential( 
+            nn.Linear(NOISE_DIM, 256), 
+            nn.LeakyReLU(0.2), 
+            nn.Linear(256, 512), 
+            nn.LeakyReLU(0.2), 
+            nn.Linear(512, 1024), 
+            nn.LeakyReLU(0.2), 
+            nn.Linear(1024, 28*28), 
+            nn.Tanh() 
+34 
+ 
+        ) 
+ 
+    def forward(self, x): 
+        return self.model(x).view(-1, 1, 28, 28) 
+ 
+# Discriminator model 
+class Discriminator(nn.Module): 
+    def __init__(self): 
+        super(Discriminator, self).__init__() 
+        self.model = nn.Sequential( 
+            nn.Linear(28*28, 1024), 
+            nn.LeakyReLU(0.2), 
+            nn.Linear(1024, 512), 
+            nn.LeakyReLU(0.2), 
+            nn.Linear(512, 256), 
+            nn.LeakyReLU(0.2), 
+            nn.Linear(256, 1), 
+            nn.Sigmoid() 
+        ) 
+ 
+    def forward(self, x): 
+        return self.model(x.view(-1, 28*28)) 
+ 
+# Initialize models and move them to the appropriate device 
+generator = Generator().to(device) 
+discriminator = Discriminator().to(device) 
+ 
+# Loss and optimizers 
+criterion = nn.BCELoss() 
+optimizer_G = optim.Adam(generator.parameters(), lr=LEARNING_RATE) 
+optimizer_D = optim.Adam(discriminator.parameters(), lr=LEARNING_RATE) 
+ 
+# Function to generate and save images 
+def generate_and_save_images(epoch, test_input): 
+    with torch.no_grad(): 
+        fake_images = generator(test_input).detach().cpu() 
+    fig = plt.figure(figsize=(4, 4)) 
+    for i in range(fake_images.size(0)): 
+        plt.subplot(4, 4, i + 1) 
+        plt.imshow(fake_images[i, 0, :, :] * 0.5 + 0.5, cmap='gray') 
+        plt.axis('off') 
+    plt.savefig(f'gan_generated_image_epoch_{epoch}.png') 
+    plt.show()
